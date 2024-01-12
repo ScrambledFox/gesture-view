@@ -31,6 +31,21 @@ COLOUR_SELECTION_STRATEGY = {
     "THUMBS_DOWN": 2,
 }
 
+# offsetLimits = [30, 400]
+colorRadius = 63*2
+colorSpacing = 25
+yAlign = 960 - 50
+selectedColor = 2
+
+COLOURS = [
+    (0, 0, 255),  # red 0
+    (0, 255, 255),  # yellow 1
+    (0, 255, 0),  # green 2
+    (255, 255, 0),  # cyan 3
+    (255, 0, 0),  # blue 4
+    (255, 0, 255),  # magenta 5
+]
+
 DRAW_DEBUG_UI = True
 
 
@@ -38,8 +53,10 @@ DRAW_DEBUG_UI = True
 # POINT
 # THUMBS DOWN TO CYCLE
 
-# OK TO ADD TO CART
-# THUMBS UP TO CHECKOUT
+# THUMBS UP TO ADD TO CART
+# POINT TO CART TO ADD TO CART
+
+# OK TO GO TO CHECKOUT
 
 
 def get_args():
@@ -131,9 +148,11 @@ def main():
 
     # Motion gestures
     interaction_start_x = 0
+    leftOffsetSinceInteractionStart = 30
 
     # Colour selection
     colourSelectionMode = COLOUR_SELECTION_STRATEGY["SWIPE"]
+    leftOffset = 30
 
     while True:
         fps = cvFpsCalc.get()
@@ -160,6 +179,8 @@ def main():
         image.flags.writeable = False
         results = hands.process(image)
         image.flags.writeable = True
+
+        debug_image = draw_ui(debug_image, leftOffset, colourSelectionMode)
 
         #  ####################################################################
         if results.multi_hand_landmarks is not None:
@@ -211,8 +232,10 @@ def main():
                     # only assign the first time
                     if interaction_start_x == -1:
                         interaction_start_x = brect[1]
+                        leftOffsetSinceInteractionStart = leftOffset
 
-                    handle_point_gesture_event(interaction_start_x, brect)
+                    leftOffset = handle_point_gesture_event(
+                        interaction_start_x, leftOffsetSinceInteractionStart, brect)
                 else:
                     interaction_start_x = -1
 
@@ -406,9 +429,11 @@ def handle_motion_gesture_event(id, label, interactionZone):
           str(interactionZone))
 
 
-def handle_point_gesture_event(interaction_start_x, brect):
+def handle_point_gesture_event(interaction_start_x,
+                               leftOffsetSinceInteractionStart, brect):
     deltaX = interaction_start_x - brect[1]
     print("Point Gesture Event Detected:" + str(deltaX))
+    return leftOffsetSinceInteractionStart + deltaX
 
 
 def logging_csv(number, mode, landmark_list, point_history_list):
@@ -655,6 +680,42 @@ def draw_point_history(image, point_history):
         if point[0] != 0 and point[1] != 0:
             cv.circle(image, (point[0], point[1]), 1 + int(index / 2),
                       (152, 251, 152), 2)
+
+    return image
+
+
+def draw_ui(image, leftOffset, colourSelectionMode):
+    rX = colorRadius+leftOffset
+    mX = rX+colorRadius+colorSpacing
+    bX = mX+colorRadius+colorSpacing
+    cX = bX+colorRadius+colorSpacing
+    gX = cX+colorRadius+colorSpacing
+    yX = gX+colorRadius+colorSpacing
+
+    positions = [rX, mX, bX, cX, gX, yX]
+    selectedColor = positions.index(min(positions, key=lambda x: abs(x-640)))
+
+    upperLimit = np.array([255, 255, 255])
+    lowerLimit = np.array([100, 100, 100])
+    mask = cv.inRange(image, lowerLimit, upperLimit)
+    contours, hierarchy = cv.findContours(
+        mask, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
+    largestContour = max(contours, key=cv.contourArea)
+    imageWithContours = copy.deepcopy(image)
+    imageWithContours = cv.drawContours(imageWithContours, [
+                                        largestContour], 0, COLOURS[selectedColor], thickness=cv.FILLED)
+    alpha = 0.5
+    image = cv.addWeighted(image, 1 - alpha, imageWithContours, alpha, 0)
+
+    for i in range(6):
+        size = 63
+        borderColor = (0, 0, 0)
+        if selectedColor == i:
+            size = size + 10
+            borderColor = (255, 255, 255)
+        image = cv.circle(
+            image, (yAlign, positions[i]), size+2, borderColor, -1)
+        image = cv.circle(image, (yAlign, positions[i]), size, COLOURS[i], -1)
 
     return image
 
