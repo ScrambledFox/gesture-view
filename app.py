@@ -25,7 +25,7 @@ INTERACTION_ZONE = {
     "TOP": 2,
 }
 
-COLOUR_SELECTION_MODE = {
+COLOUR_SELECTION_STRATEGY = {
     "SWIPE": 0,
     "POINT": 1,
     "THUMBS_DOWN": 2,
@@ -133,7 +133,7 @@ def main():
     interaction_start_x = 0
 
     # Colour selection
-    colourSelectionMode = COLOUR_SELECTION_MODE["SWIPE"]
+    colourSelectionMode = COLOUR_SELECTION_STRATEGY["SWIPE"]
 
     while True:
         fps = cvFpsCalc.get()
@@ -142,7 +142,10 @@ def main():
         key = cv.waitKey(10)
         if key == 27:  # ESC
             break
+
         number, mode = select_mode(key, mode)
+        colourSelectionMode = select_colour_selection_mode(
+            key, colourSelectionMode)
 
         # Camera capture #####################################################
         ret, image = cap.read()
@@ -250,6 +253,16 @@ def select_mode(key, mode):
     if key == 104:  # h
         mode = 2
     return number, mode
+
+
+def select_colour_selection_mode(key, colourSelectionMode):
+    if key == 115:  # s
+        colourSelectionMode = COLOUR_SELECTION_STRATEGY["SWIPE"]
+    if key == 112:  # p
+        colourSelectionMode = COLOUR_SELECTION_STRATEGY["POINT"]
+    if key == 116:  # t
+        colourSelectionMode = COLOUR_SELECTION_STRATEGY["THUMBS_DOWN"]
+    return colourSelectionMode
 
 
 def calc_bounding_rect(image, landmarks):
