@@ -1,7 +1,7 @@
 mediapipe
 opencv-python
 tensorflow
-tf-nightly
+# tf-nightly
 scikit-learn
 matplotlib
 seaborn

@@ -16,6 +16,32 @@ from model import KeyPointClassifier
 from model import PointHistoryClassifier
 
 
+EVENT_TIMER_MAX = 1000
+
+# Enum for interaction zones
+INTERACTION_ZONE = {
+    "BOTTOM": 0,
+    "CENTER": 1,
+    "TOP": 2,
+}
+
+COLOUR_SELECTION_MODE = {
+    "SWIPE": 0,
+    "POINT": 1,
+    "THUMBS_DOWN": 2,
+}
+
+DRAW_DEBUG_UI = True
+
+
+# POINT AND SWIPE
+# POINT
+# THUMBS DOWN TO CYCLE
+
+# OK TO ADD TO CART
+# THUMBS UP TO CHECKOUT
+
+
 def get_args():
     parser = argparse.ArgumentParser()
 
@@ -53,7 +79,7 @@ def main():
     use_brect = True
 
     # Camera preparation ###############################################################
-    cap = cv.VideoCapture(cap_device)
+    cap = cv.VideoCapture(cap_device, cv.CAP_DSHOW)
     cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
 
@@ -97,6 +123,17 @@ def main():
 
     #  ########################################################################
     mode = 0
+
+    # Timed gesture event ###################################################
+    currentGestureId = -1
+    currentHistoryGestureId = -1
+    eventTimer = 0
+
+    # Motion gestures
+    interaction_start_x = 0
+
+    # Colour selection
+    colourSelectionMode = COLOUR_SELECTION_MODE["SWIPE"]
 
     while True:
         fps = cvFpsCalc.get()
@@ -158,21 +195,42 @@ def main():
                 most_common_fg_id = Counter(
                     finger_gesture_history).most_common()
 
+                # Process gestures
+                eventTimer, currentGestureId, currentHistoryGestureId = \
+                    process_gesture(currentGestureId, currentHistoryGestureId,
+                                    hand_sign_id, finger_gesture_id,
+                                    keypoint_classifier_labels[hand_sign_id],
+                                    point_history_classifier_labels[finger_gesture_id],
+                                    brect, eventTimer, fps)
+
+                # Motion gestures
+                if hand_sign_id == 2:  # Point gesture
+                    # only assign the first time
+                    if interaction_start_x == -1:
+                        interaction_start_x = brect[1]
+
+                    handle_point_gesture_event(interaction_start_x, brect)
+                else:
+                    interaction_start_x = -1
+
                 # Drawing part
-                debug_image = draw_bounding_rect(use_brect, debug_image, brect)
-                debug_image = draw_landmarks(debug_image, landmark_list)
-                debug_image = draw_info_text(
-                    debug_image,
-                    brect,
-                    handedness,
-                    keypoint_classifier_labels[hand_sign_id],
-                    point_history_classifier_labels[most_common_fg_id[0][0]],
-                )
+                if DRAW_DEBUG_UI:
+                    debug_image = draw_bounding_rect(use_brect, debug_image,
+                                                     brect)
+                    debug_image = draw_landmarks(debug_image, landmark_list)
+                    debug_image = draw_info_text(
+                        debug_image,
+                        brect,
+                        handedness,
+                        keypoint_classifier_labels[hand_sign_id],
+                        point_history_classifier_labels[most_common_fg_id[0][0]],
+                    )
         else:
             point_history.append([0, 0])
 
-        debug_image = draw_point_history(debug_image, point_history)
-        debug_image = draw_info(debug_image, fps, mode, number)
+        if DRAW_DEBUG_UI:
+            debug_image = draw_point_history(debug_image, point_history)
+            debug_image = draw_info(debug_image, fps, mode, number)
 
         # Screen reflection #############################################################
         cv.imshow('Hand Gesture Recognition', debug_image)
@@ -210,6 +268,16 @@ def calc_bounding_rect(image, landmarks):
     x, y, w, h = cv.boundingRect(landmark_array)
 
     return [x, y, x + w, y + h]
+
+
+def get_interaction_zone(brect):
+    interactionZone = INTERACTION_ZONE["CENTER"]
+    if brect[0] > 600:
+        interactionZone = INTERACTION_ZONE["TOP"]
+    elif brect[0] < 300:
+        interactionZone = INTERACTION_ZONE["BOTTOM"]
+
+    return interactionZone
 
 
 def calc_landmark_list(image, landmarks):
@@ -276,6 +344,58 @@ def pre_process_point_history(image, point_history):
         itertools.chain.from_iterable(temp_point_history))
 
     return temp_point_history
+
+
+# If the current gesture is held for a certain period of time,
+# it is recognized as a gesture event
+def process_gesture(currentGestureId, currentFingerGestureId,
+                    detectedGestureId, detectedFingerGestureId,
+                    detectedGestureLabel, detectedFingerGestureLabel,
+                    brect, eventTimer, fps):
+    # Get interaction zone from bounding rect
+    interactionZone = get_interaction_zone(brect)
+
+    if detectedGestureId == 2:  # Point gesture
+        if currentFingerGestureId == detectedFingerGestureId:
+            eventTimer += 1000 / fps
+            if eventTimer > EVENT_TIMER_MAX:
+                eventTimer = 0
+                handle_motion_gesture_event(detectedFingerGestureId,
+                                            detectedFingerGestureLabel,
+                                            interactionZone)
+        else:
+            currentFingerGestureId = detectedFingerGestureId
+            eventTimer = 0
+
+        return eventTimer, currentGestureId, currentFingerGestureId
+
+    else:
+        if currentGestureId == detectedGestureId:
+            eventTimer += 1000 / fps
+            if eventTimer > EVENT_TIMER_MAX:
+                eventTimer = 0
+                handle_gesture_event(detectedGestureId,
+                                     detectedGestureLabel,
+                                     interactionZone)
+        else:
+            currentGestureId = detectedGestureId
+            eventTimer = 0
+
+        return eventTimer, currentGestureId, currentFingerGestureId
+
+
+def handle_gesture_event(id, label, interactionZone):
+    print("Gesture Event Detected:" + str(label) + ":" + str(interactionZone))
+
+
+def handle_motion_gesture_event(id, label, interactionZone):
+    print("Motion Gesture Event Detected:" + str(label) + ":" +
+          str(interactionZone))
+
+
+def handle_point_gesture_event(interaction_start_x, brect):
+    deltaX = interaction_start_x - brect[1]
+    print("Point Gesture Event Detected:" + str(deltaX))
 
 
 def logging_csv(number, mode, landmark_list, point_history_list):
@@ -495,6 +615,11 @@ def draw_info_text(image, brect, handedness, hand_sign_text,
                    finger_gesture_text):
     cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[1] - 22),
                  (0, 0, 0), -1)
+
+    # Display coords of brect
+    cv.putText(image, str(brect[0]) + ',' + str(brect[1]), (brect[0] + 5,
+                                                            brect[3] - 4),
+               cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv.LINE_AA)
 
     info_text = handedness.classification[0].label[0:]
     if hand_sign_text != "":
