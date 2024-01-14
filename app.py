@@ -32,8 +32,8 @@ COLOUR_SELECTION_STRATEGY = {
 }
 
 # offsetLimits = [30, 400]
-colorRadius = 63*2
-colorSpacing = 25
+colorRadius = 20*2
+colorSpacing = 15
 yAlign = 960 - 50
 selectedColor = 2
 
@@ -258,8 +258,10 @@ def main():
             debug_image = draw_point_history(debug_image, point_history)
             debug_image = draw_info(debug_image, fps, mode, number)
 
+        cv.namedWindow('Smart mirror', cv.WINDOW_NORMAL)
+        cv.setWindowProperty('Smart mirror', cv.WND_PROP_FULLSCREEN, cv.WINDOW_FULLSCREEN)
         # Screen reflection #############################################################
-        cv.imshow('Hand Gesture Recognition', debug_image)
+        cv.imshow('Smart mirror', debug_image)
 
     cap.release()
     cv.destroyAllWindows()
@@ -433,7 +435,7 @@ def handle_point_gesture_event(interaction_start_x,
                                leftOffsetSinceInteractionStart, brect):
     deltaX = interaction_start_x - brect[1]
     print("Point Gesture Event Detected:" + str(deltaX))
-    return leftOffsetSinceInteractionStart + deltaX
+    return leftOffsetSinceInteractionStart - deltaX
 
 
 def logging_csv(number, mode, landmark_list, point_history_list):
@@ -693,22 +695,23 @@ def draw_ui(image, leftOffset, colourSelectionMode):
     yX = gX+colorRadius+colorSpacing
 
     positions = [rX, mX, bX, cX, gX, yX]
-    selectedColor = positions.index(min(positions, key=lambda x: abs(x-640)))
+    selectedColor = positions.index(min(positions, key=lambda x: abs(x-270)))
 
     upperLimit = np.array([255, 255, 255])
     lowerLimit = np.array([100, 100, 100])
     mask = cv.inRange(image, lowerLimit, upperLimit)
     contours, hierarchy = cv.findContours(
         mask, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
-    largestContour = max(contours, key=cv.contourArea)
-    imageWithContours = copy.deepcopy(image)
-    imageWithContours = cv.drawContours(imageWithContours, [
-                                        largestContour], 0, COLOURS[selectedColor], thickness=cv.FILLED)
-    alpha = 0.5
-    image = cv.addWeighted(image, 1 - alpha, imageWithContours, alpha, 0)
+    if contours:
+        largestContour = max(contours, key=cv.contourArea)
+        imageWithContours = copy.deepcopy(image)
+        imageWithContours = cv.drawContours(imageWithContours, [
+                                            largestContour], 0, COLOURS[selectedColor], thickness=cv.FILLED)
+        alpha = 0.5
+        image = cv.addWeighted(image, 1 - alpha, imageWithContours, alpha, 0)
 
     for i in range(6):
-        size = 63
+        size = 20
         borderColor = (0, 0, 0)
         if selectedColor == i:
             size = size + 10
