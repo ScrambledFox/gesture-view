@@ -12,9 +12,9 @@ import numpy as np
 import mediapipe as mp
 
 from utils import CvFpsCalc
+from utils import draw_landmarks
 from model import KeyPointClassifier
 from model import PointHistoryClassifier
-
 
 EVENT_TIMER_MAX = 1000
 
@@ -32,10 +32,9 @@ COLOUR_SELECTION_STRATEGY = {
 }
 
 # offsetLimits = [30, 400]
-colorRadius = 20*2
+colorRadius = 20 * 2
 colorSpacing = 15
 yAlign = 960 - 50
-selectedColor = 2
 
 COLOURS = [
     (0, 0, 255),  # red 0
@@ -63,18 +62,22 @@ def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--device", type=int, default=0)
-    parser.add_argument("--width", help='cap width', type=int, default=960)
-    parser.add_argument("--height", help='cap height', type=int, default=540)
+    parser.add_argument("--width", help="cap width", type=int, default=960)
+    parser.add_argument("--height", help="cap height", type=int, default=540)
 
-    parser.add_argument('--use_static_image_mode', action='store_true')
-    parser.add_argument("--min_detection_confidence",
-                        help='min_detection_confidence',
-                        type=float,
-                        default=0.7)
-    parser.add_argument("--min_tracking_confidence",
-                        help='min_tracking_confidence',
-                        type=int,
-                        default=0.5)
+    parser.add_argument("--use_static_image_mode", action="store_true")
+    parser.add_argument(
+        "--min_detection_confidence",
+        help="min_detection_confidence",
+        type=float,
+        default=0.7,
+    )
+    parser.add_argument(
+        "--min_tracking_confidence",
+        help="min_tracking_confidence",
+        type=int,
+        default=0.5,
+    )
 
     args = parser.parse_args()
 
@@ -114,15 +117,15 @@ def main():
     point_history_classifier = PointHistoryClassifier()
 
     # Read labels ###########################################################
-    with open('model/keypoint_classifier/keypoint_classifier_label.csv',
-              encoding='utf-8-sig') as f:
-        keypoint_classifier_labels = csv.reader(f)
-        keypoint_classifier_labels = [
-            row[0] for row in keypoint_classifier_labels
-        ]
     with open(
-            'model/point_history_classifier/point_history_classifier_label.csv',
-            encoding='utf-8-sig') as f:
+        "model/keypoint_classifier/keypoint_classifier_label.csv", encoding="utf-8-sig"
+    ) as f:
+        keypoint_classifier_labels = csv.reader(f)
+        keypoint_classifier_labels = [row[0] for row in keypoint_classifier_labels]
+    with open(
+        "model/point_history_classifier/point_history_classifier_label.csv",
+        encoding="utf-8-sig",
+    ) as f:
         point_history_classifier_labels = csv.reader(f)
         point_history_classifier_labels = [
             row[0] for row in point_history_classifier_labels
@@ -131,12 +134,13 @@ def main():
     # FPS Measurement ########################################################
     cvFpsCalc = CvFpsCalc(buffer_len=10)
 
-    # Coordinate history #################################################################
+    # Coordinate history #####################################################
     history_length = 16
     point_history = deque(maxlen=history_length)
 
     # Finger gesture history ################################################
     finger_gesture_history = deque(maxlen=history_length)
+    lastFingerPos = [0, 0]
 
     #  ########################################################################
     mode = 0
@@ -151,8 +155,15 @@ def main():
     leftOffsetSinceInteractionStart = 30
 
     # Colour selection
+    selectedColour = 0
     colourSelectionMode = COLOUR_SELECTION_STRATEGY["SWIPE"]
     leftOffset = 30
+
+    # Callibration
+    colourPoints = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]
+
+    # Event queue
+    eventQueue = deque(maxlen=10)
 
     while True:
         fps = cvFpsCalc.get()
@@ -163,8 +174,8 @@ def main():
             break
 
         number, mode = select_mode(key, mode)
-        colourSelectionMode = select_colour_selection_mode(
-            key, colourSelectionMode)
+        colourSelectionMode = select_colour_selection_mode(key, colourSelectionMode)
+        colourPoints = callibrate_colour_points(key, colourPoints, lastFingerPos)
 
         # Camera capture #####################################################
         ret, image = cap.read()
@@ -180,25 +191,32 @@ def main():
         results = hands.process(image)
         image.flags.writeable = True
 
-        debug_image = draw_ui(debug_image, leftOffset, colourSelectionMode)
+        debug_image, selectedColour = draw_ui(
+            debug_image, leftOffset, selectedColour, colourSelectionMode
+        )
 
         #  ####################################################################
         if results.multi_hand_landmarks is not None:
-            for hand_landmarks, handedness in zip(results.multi_hand_landmarks,
-                                                  results.multi_handedness):
+            for hand_landmarks, handedness in zip(
+                results.multi_hand_landmarks, results.multi_handedness
+            ):
                 # Bounding box calculation
                 brect = calc_bounding_rect(debug_image, hand_landmarks)
                 # Landmark calculation
                 landmark_list = calc_landmark_list(debug_image, hand_landmarks)
 
                 # Conversion to relative coordinates / normalized coordinates
-                pre_processed_landmark_list = pre_process_landmark(
-                    landmark_list)
+                pre_processed_landmark_list = pre_process_landmark(landmark_list)
                 pre_processed_point_history_list = pre_process_point_history(
-                    debug_image, point_history)
+                    debug_image, point_history
+                )
                 # Write to the dataset file
-                logging_csv(number, mode, pre_processed_landmark_list,
-                            pre_processed_point_history_list)
+                logging_csv(
+                    number,
+                    mode,
+                    pre_processed_landmark_list,
+                    pre_processed_point_history_list,
+                )
 
                 # Hand sign classification
                 hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
@@ -212,37 +230,78 @@ def main():
                 point_history_len = len(pre_processed_point_history_list)
                 if point_history_len == (history_length * 2):
                     finger_gesture_id = point_history_classifier(
-                        pre_processed_point_history_list)
+                        pre_processed_point_history_list
+                    )
 
                 # Calculates the gesture IDs in the latest detection
                 finger_gesture_history.append(finger_gesture_id)
-                most_common_fg_id = Counter(
-                    finger_gesture_history).most_common()
+                most_common_fg_id = Counter(finger_gesture_history).most_common()
 
                 # Process gestures
-                eventTimer, currentGestureId, currentHistoryGestureId = \
-                    process_gesture(currentGestureId, currentHistoryGestureId,
-                                    hand_sign_id, finger_gesture_id,
-                                    keypoint_classifier_labels[hand_sign_id],
-                                    point_history_classifier_labels[finger_gesture_id],
-                                    brect, eventTimer, fps)
+                (
+                    eventQueue,
+                    eventTimer,
+                    currentGestureId,
+                    currentHistoryGestureId,
+                ) = process_gesture(
+                    eventQueue,
+                    currentGestureId,
+                    currentHistoryGestureId,
+                    hand_sign_id,
+                    finger_gesture_id,
+                    keypoint_classifier_labels[hand_sign_id],
+                    point_history_classifier_labels[finger_gesture_id],
+                    selectedColour,
+                    colourSelectionMode,
+                    brect,
+                    eventTimer,
+                    fps,
+                )
 
                 # Motion gestures
-                if hand_sign_id == 2:  # Point gesture
+                # Point gesture
+                if hand_sign_id == 2:
+                    lastFingerPos = [brect[1], brect[0]]
+
+                if (
+                    hand_sign_id == 2
+                    and colourSelectionMode == COLOUR_SELECTION_STRATEGY["SWIPE"]
+                ):
                     # only assign the first time
                     if interaction_start_x == -1:
                         interaction_start_x = brect[1]
                         leftOffsetSinceInteractionStart = leftOffset
 
-                    leftOffset = handle_point_gesture_event(
-                        interaction_start_x, leftOffsetSinceInteractionStart, brect)
+                    leftOffset, lastFingerPos = handle_point_gesture_event(
+                        interaction_start_x,
+                        leftOffsetSinceInteractionStart,
+                        brect,
+                        lastFingerPos,
+                    )
                 else:
                     interaction_start_x = -1
 
+                # Handle all Events in queue
+                while len(eventQueue) > 0:
+                    event = eventQueue.popleft()
+                    if event[0] == "ShiftColour":
+                        print("shift colour event")
+                        selectedColour = (selectedColour + 1) % 6
+                        print(selectedColour)
+
+                    elif event[0] == "PointStopEvent":
+                        print("point stop event")
+                        pointedColour = get_pointed_colour(
+                            event[1], event[2], colourPoints
+                        )
+
+                        if pointedColour != -1:
+                            selectedColour = pointedColour
+                            print(selectedColour)
+
                 # Drawing part
                 if DRAW_DEBUG_UI:
-                    debug_image = draw_bounding_rect(use_brect, debug_image,
-                                                     brect)
+                    debug_image = draw_bounding_rect(use_brect, debug_image, brect)
                     debug_image = draw_landmarks(debug_image, landmark_list)
                     debug_image = draw_info_text(
                         debug_image,
@@ -256,12 +315,14 @@ def main():
 
         if DRAW_DEBUG_UI:
             debug_image = draw_point_history(debug_image, point_history)
-            debug_image = draw_info(debug_image, fps, mode, number)
+            debug_image = draw_info(debug_image, fps, mode, colourSelectionMode, number)
 
-        cv.namedWindow('Smart mirror', cv.WINDOW_NORMAL)
-        cv.setWindowProperty('Smart mirror', cv.WND_PROP_FULLSCREEN, cv.WINDOW_FULLSCREEN)
+        cv.namedWindow("Smart mirror", cv.WINDOW_NORMAL)
+        cv.setWindowProperty(
+            "Smart mirror", cv.WND_PROP_FULLSCREEN, cv.WINDOW_FULLSCREEN
+        )
         # Screen reflection #############################################################
-        cv.imshow('Smart mirror', debug_image)
+        cv.imshow("Smart mirror", debug_image)
 
     cap.release()
     cv.destroyAllWindows()
@@ -288,6 +349,29 @@ def select_colour_selection_mode(key, colourSelectionMode):
     if key == 116:  # t
         colourSelectionMode = COLOUR_SELECTION_STRATEGY["THUMBS_DOWN"]
     return colourSelectionMode
+
+
+def callibrate_colour_points(key, colourPoints, lastFingerPos):
+    if key == 49:
+        colourPoints[0] = lastFingerPos
+        print("Callibrated colour point 0: " + str(colourPoints[0]))
+    if key == 50:
+        colourPoints[1] = lastFingerPos
+        print("Callibrated colour point 1: " + str(colourPoints[1]))
+    if key == 51:
+        colourPoints[2] = lastFingerPos
+        print("Callibrated colour point 2: " + str(colourPoints[2]))
+    if key == 52:
+        colourPoints[3] = lastFingerPos
+        print("Callibrated colour point 3: " + str(colourPoints[3]))
+    if key == 53:
+        colourPoints[4] = lastFingerPos
+        print("Callibrated colour point 4: " + str(colourPoints[4]))
+    if key == 54:
+        colourPoints[5] = lastFingerPos
+        print("Callibrated colour point 5: " + str(colourPoints[5]))
+
+    return colourPoints
 
 
 def calc_bounding_rect(image, landmarks):
@@ -347,8 +431,7 @@ def pre_process_landmark(landmark_list):
         temp_landmark_list[index][1] = temp_landmark_list[index][1] - base_y
 
     # Convert to a one-dimensional list
-    temp_landmark_list = list(
-        itertools.chain.from_iterable(temp_landmark_list))
+    temp_landmark_list = list(itertools.chain.from_iterable(temp_landmark_list))
 
     # Normalization
     max_value = max(list(map(abs, temp_landmark_list)))
@@ -372,24 +455,35 @@ def pre_process_point_history(image, point_history):
         if index == 0:
             base_x, base_y = point[0], point[1]
 
-        temp_point_history[index][0] = (temp_point_history[index][0] -
-                                        base_x) / image_width
-        temp_point_history[index][1] = (temp_point_history[index][1] -
-                                        base_y) / image_height
+        temp_point_history[index][0] = (
+            temp_point_history[index][0] - base_x
+        ) / image_width
+        temp_point_history[index][1] = (
+            temp_point_history[index][1] - base_y
+        ) / image_height
 
     # Convert to a one-dimensional list
-    temp_point_history = list(
-        itertools.chain.from_iterable(temp_point_history))
+    temp_point_history = list(itertools.chain.from_iterable(temp_point_history))
 
     return temp_point_history
 
 
 # If the current gesture is held for a certain period of time,
 # it is recognized as a gesture event
-def process_gesture(currentGestureId, currentFingerGestureId,
-                    detectedGestureId, detectedFingerGestureId,
-                    detectedGestureLabel, detectedFingerGestureLabel,
-                    brect, eventTimer, fps):
+def process_gesture(
+    eventQueue,
+    currentGestureId,
+    currentFingerGestureId,
+    detectedGestureId,
+    detectedFingerGestureId,
+    detectedGestureLabel,
+    detectedFingerGestureLabel,
+    selectedColour,
+    currentInteractionStrategy,
+    brect,
+    eventTimer,
+    fps,
+):
     # Get interaction zone from bounding rect
     interactionZone = get_interaction_zone(brect)
 
@@ -398,281 +492,185 @@ def process_gesture(currentGestureId, currentFingerGestureId,
             eventTimer += 1000 / fps
             if eventTimer > EVENT_TIMER_MAX:
                 eventTimer = 0
-                handle_motion_gesture_event(detectedFingerGestureId,
-                                            detectedFingerGestureLabel,
-                                            interactionZone)
+                eventQueue = handle_motion_gesture_event(
+                    eventQueue,
+                    detectedFingerGestureId,
+                    detectedFingerGestureLabel,
+                    currentInteractionStrategy,
+                    interactionZone,
+                    brect,
+                )
         else:
             currentFingerGestureId = detectedFingerGestureId
             eventTimer = 0
 
-        return eventTimer, currentGestureId, currentFingerGestureId
+        return (
+            eventQueue,
+            eventTimer,
+            currentGestureId,
+            currentFingerGestureId,
+        )
 
     else:
         if currentGestureId == detectedGestureId:
             eventTimer += 1000 / fps
             if eventTimer > EVENT_TIMER_MAX:
                 eventTimer = 0
-                handle_gesture_event(detectedGestureId,
-                                     detectedGestureLabel,
-                                     interactionZone)
+                eventQueue = handle_gesture_event(
+                    eventQueue,
+                    detectedGestureId,
+                    detectedGestureLabel,
+                    currentInteractionStrategy,
+                    interactionZone,
+                )
         else:
             currentGestureId = detectedGestureId
             eventTimer = 0
 
-        return eventTimer, currentGestureId, currentFingerGestureId
+        return (
+            eventQueue,
+            eventTimer,
+            currentGestureId,
+            currentFingerGestureId,
+        )
 
 
-def handle_gesture_event(id, label, interactionZone):
+def handle_gesture_event(eventQueue, id, label, interactionStrategy, interactionZone):
     print("Gesture Event Detected:" + str(label) + ":" + str(interactionZone))
 
+    if interactionStrategy == COLOUR_SELECTION_STRATEGY["THUMBS_DOWN"]:
+        if label == "ThumbsDown":
+            print("shift colour")
+            eventQueue.append(["ShiftColour"])
 
-def handle_motion_gesture_event(id, label, interactionZone):
-    print("Motion Gesture Event Detected:" + str(label) + ":" +
-          str(interactionZone))
+    return eventQueue
 
 
-def handle_point_gesture_event(interaction_start_x,
-                               leftOffsetSinceInteractionStart, brect):
+def handle_motion_gesture_event(
+    eventQueue, id, label, interactionStrategy, interactionZone, coords
+):
+    print("Motion Gesture Event Detected:" + str(label) + ":" + str(interactionZone))
+
+    if interactionStrategy == COLOUR_SELECTION_STRATEGY["POINT"]:
+        if label == "Stop":
+            print("Stop")
+            eventQueue.append(["PointStopEvent", interactionZone, coords])
+
+    return eventQueue
+
+
+def handle_point_gesture_event(
+    interaction_start_x, leftOffsetSinceInteractionStart, brect, lastFingerPos
+):
     deltaX = interaction_start_x - brect[1]
     print("Point Gesture Event Detected:" + str(deltaX))
-    return leftOffsetSinceInteractionStart - deltaX
+    return leftOffsetSinceInteractionStart - deltaX, lastFingerPos
+
+
+# Go through the colour points and find the closest one and return the index,
+# if none are close enough return -1
+def get_pointed_colour(interactionZone, brect, colourPoints):
+    # if interactionZone != INTERACTION_ZONE["BOTTOM"]:
+    #     return -1
+
+    print(brect)
+    print(interactionZone)
+
+    coords = [brect[1], brect[0]]
+
+    closestColour = -1
+    closest = 100
+    for i in range(6):
+        dist = np.linalg.norm(np.array(coords) - np.array(colourPoints[i]))
+        print(
+            "Distance between "
+            + str(coords)
+            + " and "
+            + str(colourPoints[i])
+            + " is "
+            + str(dist)
+        )
+        if dist < closest:
+            closest = dist
+            closestColour = i
+
+    return closestColour
 
 
 def logging_csv(number, mode, landmark_list, point_history_list):
     if mode == 0:
         pass
     if mode == 1 and (0 <= number <= 9):
-        csv_path = 'model/keypoint_classifier/keypoint.csv'
-        with open(csv_path, 'a', newline="") as f:
+        csv_path = "model/keypoint_classifier/keypoint.csv"
+        with open(csv_path, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([number, *landmark_list])
     if mode == 2 and (0 <= number <= 9):
-        csv_path = 'model/point_history_classifier/point_history.csv'
-        with open(csv_path, 'a', newline="") as f:
+        csv_path = "model/point_history_classifier/point_history.csv"
+        with open(csv_path, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([number, *point_history_list])
     return
 
 
-def draw_landmarks(image, landmark_point):
-    if len(landmark_point) > 0:
-        # Thumb
-        cv.line(image, tuple(landmark_point[2]), tuple(landmark_point[3]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[2]), tuple(landmark_point[3]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[3]), tuple(landmark_point[4]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[3]), tuple(landmark_point[4]),
-                (255, 255, 255), 2)
-
-        # Index finger
-        cv.line(image, tuple(landmark_point[5]), tuple(landmark_point[6]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[5]), tuple(landmark_point[6]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[6]), tuple(landmark_point[7]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[6]), tuple(landmark_point[7]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[7]), tuple(landmark_point[8]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[7]), tuple(landmark_point[8]),
-                (255, 255, 255), 2)
-
-        # Middle finger
-        cv.line(image, tuple(landmark_point[9]), tuple(landmark_point[10]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[9]), tuple(landmark_point[10]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[10]), tuple(landmark_point[11]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[10]), tuple(landmark_point[11]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[11]), tuple(landmark_point[12]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[11]), tuple(landmark_point[12]),
-                (255, 255, 255), 2)
-
-        # Ring finger
-        cv.line(image, tuple(landmark_point[13]), tuple(landmark_point[14]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[13]), tuple(landmark_point[14]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[14]), tuple(landmark_point[15]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[14]), tuple(landmark_point[15]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[15]), tuple(landmark_point[16]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[15]), tuple(landmark_point[16]),
-                (255, 255, 255), 2)
-
-        # Little finger
-        cv.line(image, tuple(landmark_point[17]), tuple(landmark_point[18]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[17]), tuple(landmark_point[18]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[18]), tuple(landmark_point[19]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[18]), tuple(landmark_point[19]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[19]), tuple(landmark_point[20]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[19]), tuple(landmark_point[20]),
-                (255, 255, 255), 2)
-
-        # Palm
-        cv.line(image, tuple(landmark_point[0]), tuple(landmark_point[1]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[0]), tuple(landmark_point[1]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[1]), tuple(landmark_point[2]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[1]), tuple(landmark_point[2]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[2]), tuple(landmark_point[5]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[2]), tuple(landmark_point[5]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[5]), tuple(landmark_point[9]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[5]), tuple(landmark_point[9]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[9]), tuple(landmark_point[13]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[9]), tuple(landmark_point[13]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[13]), tuple(landmark_point[17]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[13]), tuple(landmark_point[17]),
-                (255, 255, 255), 2)
-        cv.line(image, tuple(landmark_point[17]), tuple(landmark_point[0]),
-                (0, 0, 0), 6)
-        cv.line(image, tuple(landmark_point[17]), tuple(landmark_point[0]),
-                (255, 255, 255), 2)
-
-    # Key Points
-    for index, landmark in enumerate(landmark_point):
-        if index == 0:  # 手首1
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 1:  # 手首2
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 2:  # 親指：付け根
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 3:  # 親指：第1関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 4:  # 親指：指先
-            cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-        if index == 5:  # 人差指：付け根
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 6:  # 人差指：第2関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 7:  # 人差指：第1関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 8:  # 人差指：指先
-            cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-        if index == 9:  # 中指：付け根
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 10:  # 中指：第2関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 11:  # 中指：第1関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 12:  # 中指：指先
-            cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-        if index == 13:  # 薬指：付け根
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 14:  # 薬指：第2関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 15:  # 薬指：第1関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 16:  # 薬指：指先
-            cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-        if index == 17:  # 小指：付け根
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 18:  # 小指：第2関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 19:  # 小指：第1関節
-            cv.circle(image, (landmark[0], landmark[1]), 5, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 5, (0, 0, 0), 1)
-        if index == 20:  # 小指：指先
-            cv.circle(image, (landmark[0], landmark[1]), 8, (255, 255, 255),
-                      -1)
-            cv.circle(image, (landmark[0], landmark[1]), 8, (0, 0, 0), 1)
-
-    return image
-
-
 def draw_bounding_rect(use_brect, image, brect):
     if use_brect:
         # Outer rectangle
-        cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]),
-                     (0, 0, 0), 1)
+        cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]), (0, 0, 0), 1)
 
     return image
 
 
-def draw_info_text(image, brect, handedness, hand_sign_text,
-                   finger_gesture_text):
-    cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[1] - 22),
-                 (0, 0, 0), -1)
+def draw_info_text(image, brect, handedness, hand_sign_text, finger_gesture_text):
+    cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[1] - 22), (0, 0, 0), -1)
 
     # Display coords of brect
-    cv.putText(image, str(brect[0]) + ',' + str(brect[1]), (brect[0] + 5,
-                                                            brect[3] - 4),
-               cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv.LINE_AA)
+    cv.putText(
+        image,
+        str(brect[0]) + "," + str(brect[1]),
+        (brect[0] + 5, brect[3] - 4),
+        cv.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 255, 255),
+        1,
+        cv.LINE_AA,
+    )
 
     info_text = handedness.classification[0].label[0:]
     if hand_sign_text != "":
-        info_text = info_text + ':' + hand_sign_text
-    cv.putText(image, info_text, (brect[0] + 5, brect[1] - 4),
-               cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv.LINE_AA)
+        info_text = info_text + ":" + hand_sign_text
+    cv.putText(
+        image,
+        info_text,
+        (brect[0] + 5, brect[1] - 4),
+        cv.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 255, 255),
+        1,
+        cv.LINE_AA,
+    )
 
     if finger_gesture_text != "":
-        cv.putText(image, "Finger Gesture:" + finger_gesture_text, (10, 60),
-                   cv.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 4, cv.LINE_AA)
-        cv.putText(image, "Finger Gesture:" + finger_gesture_text, (10, 60),
-                   cv.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2,
-                   cv.LINE_AA)
+        cv.putText(
+            image,
+            "Finger Gesture:" + finger_gesture_text,
+            (10, 60),
+            cv.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 0, 0),
+            4,
+            cv.LINE_AA,
+        )
+        cv.putText(
+            image,
+            "Finger Gesture:" + finger_gesture_text,
+            (10, 60),
+            cv.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (255, 255, 255),
+            2,
+            cv.LINE_AA,
+        )
 
     return image
 
@@ -680,66 +678,120 @@ def draw_info_text(image, brect, handedness, hand_sign_text,
 def draw_point_history(image, point_history):
     for index, point in enumerate(point_history):
         if point[0] != 0 and point[1] != 0:
-            cv.circle(image, (point[0], point[1]), 1 + int(index / 2),
-                      (152, 251, 152), 2)
+            cv.circle(
+                image, (point[0], point[1]), 1 + int(index / 2), (152, 251, 152), 2
+            )
 
     return image
 
 
-def draw_ui(image, leftOffset, colourSelectionMode):
-    rX = colorRadius+leftOffset
-    mX = rX+colorRadius+colorSpacing
-    bX = mX+colorRadius+colorSpacing
-    cX = bX+colorRadius+colorSpacing
-    gX = cX+colorRadius+colorSpacing
-    yX = gX+colorRadius+colorSpacing
+def draw_ui(image, leftOffset, selectedColour, colourSelectionMode):
+    if colourSelectionMode != COLOUR_SELECTION_STRATEGY["SWIPE"]:
+        leftOffset = 120
+
+    rX = colorRadius + leftOffset
+    mX = rX + colorRadius + colorSpacing
+    bX = mX + colorRadius + colorSpacing
+    cX = bX + colorRadius + colorSpacing
+    gX = cX + colorRadius + colorSpacing
+    yX = gX + colorRadius + colorSpacing
 
     positions = [rX, mX, bX, cX, gX, yX]
-    selectedColor = positions.index(min(positions, key=lambda x: abs(x-270)))
+
+    if colourSelectionMode == COLOUR_SELECTION_STRATEGY["SWIPE"]:
+        selectedColour = positions.index(min(positions, key=lambda x: abs(x - 270)))
+    elif colourSelectionMode == COLOUR_SELECTION_STRATEGY["POINT"]:
+        pass
+    elif colourSelectionMode == COLOUR_SELECTION_STRATEGY["THUMBS_DOWN"]:
+        pass
 
     upperLimit = np.array([255, 255, 255])
     lowerLimit = np.array([100, 100, 100])
     mask = cv.inRange(image, lowerLimit, upperLimit)
-    contours, hierarchy = cv.findContours(
-        mask, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
+    contours, hierarchy = cv.findContours(mask, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
     if contours:
         largestContour = max(contours, key=cv.contourArea)
         imageWithContours = copy.deepcopy(image)
-        imageWithContours = cv.drawContours(imageWithContours, [
-                                            largestContour], 0, COLOURS[selectedColor], thickness=cv.FILLED)
+        imageWithContours = cv.drawContours(
+            imageWithContours,
+            [largestContour],
+            0,
+            COLOURS[selectedColour],
+            thickness=cv.FILLED,
+        )
         alpha = 0.5
         image = cv.addWeighted(image, 1 - alpha, imageWithContours, alpha, 0)
 
     for i in range(6):
         size = 20
         borderColor = (0, 0, 0)
-        if selectedColor == i:
+        if selectedColour == i:
             size = size + 10
             borderColor = (255, 255, 255)
-        image = cv.circle(
-            image, (yAlign, positions[i]), size+2, borderColor, -1)
+        image = cv.circle(image, (yAlign, positions[i]), size + 2, borderColor, -1)
         image = cv.circle(image, (yAlign, positions[i]), size, COLOURS[i], -1)
 
-    return image
+    return image, selectedColour
 
 
-def draw_info(image, fps, mode, number):
-    cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
-               1.0, (0, 0, 0), 4, cv.LINE_AA)
-    cv.putText(image, "FPS:" + str(fps), (10, 30), cv.FONT_HERSHEY_SIMPLEX,
-               1.0, (255, 255, 255), 2, cv.LINE_AA)
+def draw_info(image, fps, mode, interactionMode, number):
+    cv.putText(
+        image,
+        "FPS:" + str(fps),
+        (10, 30),
+        cv.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (0, 0, 0),
+        4,
+        cv.LINE_AA,
+    )
+    cv.putText(
+        image,
+        "FPS:" + str(fps),
+        (10, 30),
+        cv.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (255, 255, 255),
+        2,
+        cv.LINE_AA,
+    )
 
-    mode_string = ['Logging Key Point', 'Logging Point History']
+    cv.putText(
+        image,
+        "Interaction Mode: " + str(interactionMode),
+        (10, 140),
+        cv.FONT_HERSHEY_SIMPLEX,
+        1.0,
+        (255, 255, 255),
+        1,
+        cv.LINE_AA,
+    )
+
+    mode_string = ["Logging Key Point", "Logging Point History"]
     if 1 <= mode <= 2:
-        cv.putText(image, "MODE:" + mode_string[mode - 1], (10, 90),
-                   cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
-                   cv.LINE_AA)
+        cv.putText(
+            image,
+            "MODE:" + mode_string[mode - 1],
+            (10, 90),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            1,
+            cv.LINE_AA,
+        )
         if 0 <= number <= 9:
-            cv.putText(image, "NUM:" + str(number), (10, 110),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1,
-                       cv.LINE_AA)
+            cv.putText(
+                image,
+                "NUM:" + str(number),
+                (10, 110),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                1,
+                cv.LINE_AA,
+            )
     return image
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
