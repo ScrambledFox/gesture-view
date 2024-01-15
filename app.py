@@ -34,7 +34,11 @@ COLOUR_SELECTION_STRATEGY = {
 # offsetLimits = [30, 400]
 colorRadius = 20 * 2
 colorSpacing = 15
-yAlign = 960 - 50
+yAlign = 50
+
+
+# Shopping chart state
+shoppingChartCount = 0
 
 COLOURS = [
     (0, 0, 255),  # red 0
@@ -84,6 +88,9 @@ def get_args():
 
 
 def main():
+    # Globals fuck python
+    global shoppingChartCount
+
     # Argument parsing #################################################################
     args = get_args()
 
@@ -160,9 +167,6 @@ def main():
     selectedColour = 0
     colourSelectionMode = COLOUR_SELECTION_STRATEGY["SWIPE"]
     leftOffset = 30
-
-    # Shopping chart state
-    shoppingChartCount = 0
 
     # Callibration
     uiPoints = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]
@@ -344,8 +348,8 @@ def main():
         1,
         cv.LINE_AA,
         )
-        shoppingChartRotated = cv.rotate(shoppingChartWithCount, cv.ROTATE_90_COUNTERCLOCKWISE)
-        debug_image = merge_image(debug_image, shoppingChartRotated, 0, 0)
+        shoppingChartRotated = cv.rotate(shoppingChartWithCount, cv.ROTATE_90_CLOCKWISE)
+        debug_image = merge_image(debug_image, shoppingChartRotated, 960-80, 540-50)
 
         # Screen reflection #############################################################
         cv.imshow("Smart mirror", debug_image)
@@ -570,6 +574,10 @@ def handle_gesture_event(eventQueue, id, label, interactionStrategy, interaction
         if label == "ThumbsDown":
             print("shift colour")
             eventQueue.append(["ShiftColour"])
+        if label == "ThumbsUp":
+            print("add to chart")
+            global shoppingChartCount
+            shoppingChartCount = shoppingChartCount+1
 
     return eventQueue
 
