@@ -569,6 +569,7 @@ def process_gesture(
 
 def handle_gesture_event(eventQueue, id, label, interactionStrategy, interactionZone):
     print("Gesture Event Detected:" + str(label) + ":" + str(interactionZone))
+    global shoppingChartCount
 
     if interactionStrategy == COLOUR_SELECTION_STRATEGY["THUMBS_DOWN"]:
         if label == "ThumbsDown":
@@ -576,9 +577,12 @@ def handle_gesture_event(eventQueue, id, label, interactionStrategy, interaction
             eventQueue.append(["ShiftColour"])
         if label == "ThumbsUp":
             print("add to chart")
-            global shoppingChartCount
             shoppingChartCount = shoppingChartCount+1
 
+    if interactionStrategy == COLOUR_SELECTION_STRATEGY["SWIPE"]:
+        if label == "OK":
+            print("add to chart")
+            shoppingChartCount = shoppingChartCount+1
     return eventQueue
 
 
