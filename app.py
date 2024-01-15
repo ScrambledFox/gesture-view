@@ -52,10 +52,9 @@ DRAW_DEBUG_UI = True
 # POINT
 # THUMBS DOWN TO CYCLE
 
-# THUMBS UP TO ADD TO CART
+# OK TO ADD TO CART
 # POINT TO CART TO ADD TO CART
-
-# OK TO GO TO CHECKOUT
+# THUMBS UP TO ADD TO CART
 
 
 def get_args():
@@ -102,6 +101,9 @@ def main():
     cap = cv.VideoCapture(cap_device, cv.CAP_DSHOW)
     cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
     cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
+
+    # Load images ################
+    shoppingChart = cv.imread("chart.png")
 
     # Model load #############################################################
     mp_hands = mp.solutions.hands
@@ -159,8 +161,11 @@ def main():
     colourSelectionMode = COLOUR_SELECTION_STRATEGY["SWIPE"]
     leftOffset = 30
 
+    # Shopping chart state
+    shoppingChartCount = 0
+
     # Callibration
-    colourPoints = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]
+    uiPoints = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]
 
     # Event queue
     eventQueue = deque(maxlen=10)
@@ -175,7 +180,7 @@ def main():
 
         number, mode = select_mode(key, mode)
         colourSelectionMode = select_colour_selection_mode(key, colourSelectionMode)
-        colourPoints = callibrate_colour_points(key, colourPoints, lastFingerPos)
+        uiPoints = callibrate_ui_points(key, uiPoints, lastFingerPos)
 
         # Camera capture #####################################################
         ret, image = cap.read()
@@ -291,13 +296,18 @@ def main():
 
                     elif event[0] == "PointStopEvent":
                         print("point stop event")
-                        pointedColour = get_pointed_colour(
-                            event[1], event[2], colourPoints
+                        pointedUi = get_pointed_ui(
+                            event[1], event[2], uiPoints
                         )
 
-                        if pointedColour != -1:
-                            selectedColour = pointedColour
+                        # Color selection
+                        if pointedUi > 0 and pointedUi < 6:
+                            selectedColour = pointedUi
                             print(selectedColour)
+                        # Shopping chart selection
+                        elif pointedUi == 6:
+                            shoppingChartCount = shoppingChartCount + 1
+
 
                 # Drawing part
                 if DRAW_DEBUG_UI:
@@ -321,6 +331,22 @@ def main():
         cv.setWindowProperty(
             "Smart mirror", cv.WND_PROP_FULLSCREEN, cv.WINDOW_FULLSCREEN
         )
+
+        # Add shopping chart
+        shoppingChartWithCount = shoppingChart.copy()
+        cv.putText(
+        shoppingChartWithCount,
+        str(shoppingChartCount),
+        (20, 30),
+        cv.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 0, 0),
+        1,
+        cv.LINE_AA,
+        )
+        shoppingChartRotated = cv.rotate(shoppingChartWithCount, cv.ROTATE_90_COUNTERCLOCKWISE)
+        debug_image = merge_image(debug_image, shoppingChartRotated, 0, 0)
+
         # Screen reflection #############################################################
         cv.imshow("Smart mirror", debug_image)
 
@@ -351,28 +377,30 @@ def select_colour_selection_mode(key, colourSelectionMode):
     return colourSelectionMode
 
 
-def callibrate_colour_points(key, colourPoints, lastFingerPos):
+def callibrate_ui_points(key, uiPoints, lastFingerPos):
     if key == 49:
-        colourPoints[0] = lastFingerPos
-        print("Callibrated colour point 0: " + str(colourPoints[0]))
+        uiPoints[0] = lastFingerPos
+        print("Callibrated ui point 0: " + str(uiPoints[0]))
     if key == 50:
-        colourPoints[1] = lastFingerPos
-        print("Callibrated colour point 1: " + str(colourPoints[1]))
+        uiPoints[1] = lastFingerPos
+        print("Callibrated ui point 1: " + str(uiPoints[1]))
     if key == 51:
-        colourPoints[2] = lastFingerPos
-        print("Callibrated colour point 2: " + str(colourPoints[2]))
+        uiPoints[2] = lastFingerPos
+        print("Callibrated ui point 2: " + str(uiPoints[2]))
     if key == 52:
-        colourPoints[3] = lastFingerPos
-        print("Callibrated colour point 3: " + str(colourPoints[3]))
+        uiPoints[3] = lastFingerPos
+        print("Callibrated ui point 3: " + str(uiPoints[3]))
     if key == 53:
-        colourPoints[4] = lastFingerPos
-        print("Callibrated colour point 4: " + str(colourPoints[4]))
+        uiPoints[4] = lastFingerPos
+        print("Callibrated ui point 4: " + str(uiPoints[4]))
     if key == 54:
-        colourPoints[5] = lastFingerPos
-        print("Callibrated colour point 5: " + str(colourPoints[5]))
+        uiPoints[5] = lastFingerPos
+        print("Callibrated ui point 5: " + str(uiPoints[5]))
+    if key == 55:
+        uiPoints[6] = lastFingerPos
+        print("Callibrated ui point 6: " + str(uiPoints[6]))
 
-    return colourPoints
-
+    return uiPoints
 
 def calc_bounding_rect(image, landmarks):
     image_width, image_height = image.shape[1], image.shape[0]
@@ -567,9 +595,9 @@ def handle_point_gesture_event(
     return leftOffsetSinceInteractionStart - deltaX, lastFingerPos
 
 
-# Go through the colour points and find the closest one and return the index,
+# Go through the ui points and find the closest one and return the index,
 # if none are close enough return -1
-def get_pointed_colour(interactionZone, brect, colourPoints):
+def get_pointed_ui(interactionZone, brect, uiPoints):
     # if interactionZone != INTERACTION_ZONE["BOTTOM"]:
     #     return -1
 
@@ -578,23 +606,23 @@ def get_pointed_colour(interactionZone, brect, colourPoints):
 
     coords = [brect[1], brect[0]]
 
-    closestColour = -1
+    closestUi = -1
     closest = 100
-    for i in range(6):
-        dist = np.linalg.norm(np.array(coords) - np.array(colourPoints[i]))
+    for i in range(7):
+        dist = np.linalg.norm(np.array(coords) - np.array(uiPoints[i]))
         print(
             "Distance between "
             + str(coords)
             + " and "
-            + str(colourPoints[i])
+            + str(uiPoints[i])
             + " is "
             + str(dist)
         )
         if dist < closest:
             closest = dist
-            closestColour = i
+            closestUi = i
 
-    return closestColour
+    return closestUi
 
 
 def logging_csv(number, mode, landmark_list, point_history_list):
@@ -706,7 +734,7 @@ def draw_ui(image, leftOffset, selectedColour, colourSelectionMode):
         pass
 
     upperLimit = np.array([255, 255, 255])
-    lowerLimit = np.array([100, 100, 100])
+    lowerLimit = np.array([200, 200, 200])
     mask = cv.inRange(image, lowerLimit, upperLimit)
     contours, hierarchy = cv.findContours(mask, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
     if contours:
@@ -733,6 +761,31 @@ def draw_ui(image, leftOffset, selectedColour, colourSelectionMode):
 
     return image, selectedColour
 
+def merge_image(back, front, x,y):
+    # convert to rgba
+    if back.shape[2] == 3:
+        back = cv.cvtColor(back, cv.COLOR_BGR2BGRA)
+    if front.shape[2] == 3:
+        front = cv.cvtColor(front, cv.COLOR_BGR2BGRA)
+
+    # crop the overlay from both images
+    bh,bw = back.shape[:2]
+    fh,fw = front.shape[:2]
+    x1, x2 = max(x, 0), min(x+fw, bw)
+    y1, y2 = max(y, 0), min(y+fh, bh)
+    front_cropped = front[y1-y:y2-y, x1-x:x2-x]
+    back_cropped = back[y1:y2, x1:x2]
+
+    alpha_front = front_cropped[:,:,3:4] / 255
+    alpha_back = back_cropped[:,:,3:4] / 255
+    
+    # replace an area in result with overlay
+    result = back.copy()
+    print(f'af: {alpha_front.shape}\nab: {alpha_back.shape}\nfront_cropped: {front_cropped.shape}\nback_cropped: {back_cropped.shape}')
+    result[y1:y2, x1:x2, :3] = alpha_front * front_cropped[:,:,:3] + (1-alpha_front) * back_cropped[:,:,:3]
+    result[y1:y2, x1:x2, 3:4] = (alpha_front + alpha_back) / (1 + alpha_front*alpha_back) * 255
+
+    return result
 
 def draw_info(image, fps, mode, interactionMode, number):
     cv.putText(
