@@ -32,7 +32,7 @@ COLOUR_SELECTION_STRATEGY = {
 }
 
 # offsetLimits = [30, 400]
-colorRadius = 20 * 2
+colorRadius = 40 * 2
 colorSpacing = 15
 yAlign = 1280-50
 
@@ -312,7 +312,6 @@ def main():
                         elif pointedUi == 6:
                             shoppingChartCount = shoppingChartCount + 1
 
-
                 # Drawing part
                 if DRAW_DEBUG_UI:
                     # debug_image = draw_bounding_rect(use_brect, debug_image, brect)
@@ -327,16 +326,7 @@ def main():
         else:
             point_history.append([0, 0])
 
-        if DRAW_DEBUG_UI:
-            debug_image = draw_point_history(debug_image, point_history)
-            #debug_image = draw_info(debug_image, fps, mode, colourSelectionMode, number)
-
-        cv.namedWindow("Smart mirror", cv.WINDOW_NORMAL)
-        cv.setWindowProperty(
-            "Smart mirror", cv.WND_PROP_FULLSCREEN, cv.WINDOW_FULLSCREEN
-        )
-
-        # Add shopping chart
+         # Add shopping chart
         shoppingChartWithCount = shoppingChart.copy()
         cv.putText(
         shoppingChartWithCount,
@@ -350,6 +340,15 @@ def main():
         )
         shoppingChartRotated = cv.rotate(shoppingChartWithCount, cv.ROTATE_90_CLOCKWISE)
         debug_image = merge_image(debug_image, shoppingChartRotated, cap_width-80, 670)
+
+        if DRAW_DEBUG_UI:
+            debug_image = draw_point_history(debug_image, point_history)
+            #debug_image = draw_info(debug_image, fps, mode, colourSelectionMode, number)
+
+        cv.namedWindow("Smart mirror", cv.WINDOW_NORMAL)
+        cv.setWindowProperty(
+            "Smart mirror", cv.WND_PROP_FULLSCREEN, cv.WINDOW_FULLSCREEN
+        )
 
         # Screen reflection #############################################################
         cv.imshow("Smart mirror", debug_image)
@@ -727,7 +726,7 @@ def draw_point_history(image, point_history):
 
 def draw_ui(image, leftOffset, selectedColour, colourSelectionMode):
     if colourSelectionMode != COLOUR_SELECTION_STRATEGY["SWIPE"]:
-        leftOffset = 180
+        leftOffset = 40
 
     rX = colorRadius + leftOffset
     mX = rX + colorRadius + colorSpacing
@@ -763,7 +762,7 @@ def draw_ui(image, leftOffset, selectedColour, colourSelectionMode):
         image = cv.addWeighted(image, 1 - alpha, imageWithContours, alpha, 0)
 
     for i in range(6):
-        size = 20
+        size = 40
         borderColor = (0, 0, 0)
         if selectedColour == i:
             size = size + 10
