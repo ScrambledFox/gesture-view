@@ -34,7 +34,7 @@ COLOUR_SELECTION_STRATEGY = {
 # offsetLimits = [30, 400]
 colorRadius = 20 * 2
 colorSpacing = 15
-yAlign = 50
+yAlign = 1280-50
 
 
 # Shopping chart state
@@ -65,8 +65,8 @@ def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--device", type=int, default=0)
-    parser.add_argument("--width", help="cap width", type=int, default=960)
-    parser.add_argument("--height", help="cap height", type=int, default=540)
+    parser.add_argument("--width", help="cap width", type=int, default=1280)
+    parser.add_argument("--height", help="cap height", type=int, default=960)
 
     parser.add_argument("--use_static_image_mode", action="store_true")
     parser.add_argument(
@@ -166,7 +166,7 @@ def main():
     # Colour selection
     selectedColour = 0
     colourSelectionMode = COLOUR_SELECTION_STRATEGY["SWIPE"]
-    leftOffset = 30
+    leftOffset = 50
 
     # Callibration
     uiPoints = [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]
@@ -349,7 +349,7 @@ def main():
         cv.LINE_AA,
         )
         shoppingChartRotated = cv.rotate(shoppingChartWithCount, cv.ROTATE_90_CLOCKWISE)
-        debug_image = merge_image(debug_image, shoppingChartRotated, 960-80, 540-50)
+        debug_image = merge_image(debug_image, shoppingChartRotated, cap_width-80, 670)
 
         # Screen reflection #############################################################
         cv.imshow("Smart mirror", debug_image)
@@ -727,7 +727,7 @@ def draw_point_history(image, point_history):
 
 def draw_ui(image, leftOffset, selectedColour, colourSelectionMode):
     if colourSelectionMode != COLOUR_SELECTION_STRATEGY["SWIPE"]:
-        leftOffset = 120
+        leftOffset = 180
 
     rX = colorRadius + leftOffset
     mX = rX + colorRadius + colorSpacing
