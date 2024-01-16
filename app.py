@@ -315,21 +315,21 @@ def main():
 
                 # Drawing part
                 if DRAW_DEBUG_UI:
-                    debug_image = draw_bounding_rect(use_brect, debug_image, brect)
+                    # debug_image = draw_bounding_rect(use_brect, debug_image, brect)
                     debug_image = draw_landmarks(debug_image, landmark_list)
-                    debug_image = draw_info_text(
-                        debug_image,
-                        brect,
-                        handedness,
-                        keypoint_classifier_labels[hand_sign_id],
-                        point_history_classifier_labels[most_common_fg_id[0][0]],
-                    )
+                    # debug_image = draw_info_text(
+                    #     debug_image,
+                    #     brect,
+                    #     handedness,
+                    #     keypoint_classifier_labels[hand_sign_id],
+                    #     point_history_classifier_labels[most_common_fg_id[0][0]],
+                    # )
         else:
             point_history.append([0, 0])
 
         if DRAW_DEBUG_UI:
             debug_image = draw_point_history(debug_image, point_history)
-            debug_image = draw_info(debug_image, fps, mode, colourSelectionMode, number)
+            #debug_image = draw_info(debug_image, fps, mode, colourSelectionMode, number)
 
         cv.namedWindow("Smart mirror", cv.WINDOW_NORMAL)
         cv.setWindowProperty(
@@ -793,7 +793,7 @@ def merge_image(back, front, x,y):
     
     # replace an area in result with overlay
     result = back.copy()
-    print(f'af: {alpha_front.shape}\nab: {alpha_back.shape}\nfront_cropped: {front_cropped.shape}\nback_cropped: {back_cropped.shape}')
+    # print(f'af: {alpha_front.shape}\nab: {alpha_back.shape}\nfront_cropped: {front_cropped.shape}\nback_cropped: {back_cropped.shape}')
     result[y1:y2, x1:x2, :3] = alpha_front * front_cropped[:,:,:3] + (1-alpha_front) * back_cropped[:,:,:3]
     result[y1:y2, x1:x2, 3:4] = (alpha_front + alpha_back) / (1 + alpha_front*alpha_back) * 255
 
